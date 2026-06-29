@@ -1,70 +1,56 @@
 """
-GitFlow Sim - Backend: Struktur Data Murni
-Berisi: CommitNode, Stack, BranchManager
+GitFlow Sim – Backend v2
+Struktur data murni: CommitNode, Stack, BranchManager
+Baru: fork-point tracking, conflict detail, merge reconciliation
 """
 
-import hashlib
-import time
-import random
+import hashlib, time, random
 
 
-# ──────────────────────────────────────────────
-# 1. COMMIT NODE  (pengganti linked-list node)
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. COMMIT NODE
+# ─────────────────────────────────────────────────────────────────────────────
 class CommitNode:
     """
-    Satu simpul commit.  Atribut `prev` adalah POINTER manual
-    ke CommitNode sebelumnya (bukan list Python).
+    Satu simpul commit.  `prev` adalah POINTER manual ke node sebelumnya.
     """
     def __init__(self, message: str, content: str, prev=None):
-        # Buat hash unik dari pesan + waktu + angka acak
         raw = f"{message}{time.time()}{random.random()}"
-        self.commit_id: str = hashlib.sha1(raw.encode()).hexdigest()[:7]
-        self.message: str = message
-        self.timestamp: str = time.strftime("%H:%M:%S")
-        self.content: str = content          # "isi file" yang disimulasikan
-        self.prev: "CommitNode | None" = prev   # ← pointer manual
-
-        # Alamat memori buatan (hanya untuk visualisasi)
+        self.commit_id:    str  = hashlib.sha1(raw.encode()).hexdigest()[:7]
+        self.message:      str  = message
+        self.timestamp:    str  = time.strftime("%H:%M:%S")
+        self.content:      str  = content
+        self.prev: "CommitNode | None" = prev
         base = random.randint(0x7FFE10, 0x7FFEFF)
-        self.fake_address: str = f"0x{base:X}"
+        self.fake_address: str  = f"0x{base:X}"
 
     def __repr__(self):
         return f"CommitNode({self.commit_id}, '{self.message}')"
 
 
-# ──────────────────────────────────────────────
-# 2. STACK  (implementasi manual tanpa list.append/pop)
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. STACK  (linked-list manual)
+# ─────────────────────────────────────────────────────────────────────────────
 class Stack:
-    """
-    Stack berbasis linked-list manual.
-    _top  → CommitNode teratas  (HEAD)
-    _size → jumlah elemen
-    """
     def __init__(self):
-        self._top: CommitNode | None = None
+        self._top:  CommitNode | None = None
         self._size: int = 0
 
-    # — Operasi Utama —
     def push(self, node: CommitNode) -> None:
-        """Tautkan node baru ke atas stack (O(1))."""
-        node.prev = self._top          # arahkan pointer node ke top lama
-        self._top = node               # top sekarang adalah node baru
+        node.prev  = self._top
+        self._top  = node
         self._size += 1
 
     def pop(self) -> CommitNode | None:
-        """Cabut elemen teratas, kembalikan node-nya (O(1))."""
         if self.is_empty():
             return None
-        node = self._top
-        self._top = node.prev          # geser top ke bawah
-        node.prev = None               # putus pointer (bersihkan referensi)
+        node       = self._top
+        self._top  = node.prev
+        node.prev  = None
         self._size -= 1
         return node
 
     def peek(self) -> CommitNode | None:
-        """Lihat elemen teratas tanpa mencabut."""
         return self._top
 
     def is_empty(self) -> bool:
@@ -73,31 +59,45 @@ class Stack:
     def size(self) -> int:
         return self._size
 
-    # — Helper: ubah stack jadi list (untuk visualisasi, dari atas ke bawah) —
     def to_list(self) -> list[CommitNode]:
-        result = []
-        current = self._top
-        while current is not None:
-            result.append(current)
-            current = current.prev
+        """Kembalikan list dari TOP → BOTTOM."""
+        result, cur = [], self._top
+        while cur:
+            result.append(cur)
+            cur = cur.prev
         return result
 
 
-# ──────────────────────────────────────────────
-# 3. BRANCH MANAGER
-# ──────────────────────────────────────────────
-class BranchManager:
-    """
-    Mengelola seluruh branch, pointer aktif, dan rollback stack.
-    Setiap branch punya Stack commit + Stack rollback tersendiri.
-    """
-    def __init__(self):
-        # Inisiasi branch utama
-        self._branches: dict[str, Stack] = {"main": Stack()}
-        self._rollbacks: dict[str, Stack] = {"main": Stack()}
-        self._active: str = "main"           # ← Active Branch Pointer
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. CONFLICT INFO  (data class sederhana)
+# ─────────────────────────────────────────────────────────────────────────────
+class ConflictInfo:
+    """Menyimpan detail konflik yang terdeteksi."""
+    def __init__(self, branch_a: str, branch_b: str,
+                 head_a: CommitNode, head_b: CommitNode,
+                 fork_id: str | None):
+        self.branch_a   = branch_a     # biasanya "main"
+        self.branch_b   = branch_b
+        self.head_a     = head_a       # HEAD main saat konflik
+        self.head_b     = head_b       # HEAD branch B
+        self.fork_id    = fork_id      # commit_id titik percabangan
+        self.resolved   = False
+        self.winner     = None         # "main" | "branch"
 
-    # ── Properties ──────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. BRANCH MANAGER
+# ─────────────────────────────────────────────────────────────────────────────
+class BranchManager:
+    def __init__(self):
+        self._branches:  dict[str, Stack] = {"main": Stack()}
+        self._rollbacks: dict[str, Stack] = {"main": Stack()}
+        # fork_points[branch_name] = commit_id tempat branch itu dibuat
+        self._fork_points: dict[str, str | None] = {"main": None}
+        self._active: str = "main"
+        self.last_conflict: ConflictInfo | None = None
+
+    # ── Properti ─────────────────────────────────────────────────────────────
     @property
     def active_branch(self) -> str:
         return self._active
@@ -112,68 +112,50 @@ class BranchManager:
     def current_rollback(self) -> Stack:
         return self._rollbacks[self._active]
 
-    # ── Operasi Commit ───────────────────────
+    # ── Commit ────────────────────────────────────────────────────────────────
     def commit(self, message: str, content: str) -> CommitNode:
-        """Push commit baru ke stack branch aktif."""
         node = CommitNode(message, content)
         self.current_stack().push(node)
-        # Hapus rollback karena jalur baru dimulai
-        self._rollbacks[self._active] = Stack()
+        self._rollbacks[self._active] = Stack()   # buang rollback buffer
         return node
 
-    # ── Time-Travel ──────────────────────────
+    # ── Time-Travel ──────────────────────────────────────────────────────────
     def rewind(self) -> CommitNode | None:
-        """
-        Pop dari commit stack → push ke rollback stack.
-        Kembalikan node yang dipop (untuk mengupdate editor).
-        """
-        stack = self.current_stack()
-        rollback = self.current_rollback()
+        stack, rollback = self.current_stack(), self.current_rollback()
         if stack.size() <= 1:
-            # Jaga agar minimal 1 commit tersisa (tidak bisa balik ke kosong)
             return None
         node = stack.pop()
         rollback.push(node)
         return node
 
     def forward(self) -> CommitNode | None:
-        """
-        Pop dari rollback stack → push kembali ke commit stack.
-        """
-        stack = self.current_stack()
-        rollback = self.current_rollback()
+        stack, rollback = self.current_stack(), self.current_rollback()
         if rollback.is_empty():
             return None
         node = rollback.pop()
         stack.push(node)
         return node
 
-    def can_rewind(self) -> bool:
-        return self.current_stack().size() > 1
+    def can_rewind(self)  -> bool: return self.current_stack().size() > 1
+    def can_forward(self) -> bool: return not self.current_rollback().is_empty()
 
-    def can_forward(self) -> bool:
-        return not self.current_rollback().is_empty()
-
-    # ── Branch Operations ─────────────────────
+    # ── Branch ───────────────────────────────────────────────────────────────
     def create_branch(self, name: str) -> bool:
-        """
-        Buat branch baru dari HEAD branch aktif saat ini.
-        Salin node HEAD (bukan stack penuh) sebagai titik awal.
-        """
         if name in self._branches:
-            return False  # nama sudah ada
+            return False
         new_stack = Stack()
-        new_rollback = Stack()
-        # Salin seluruh history dari branch aktif ke branch baru
-        nodes = self.current_stack().to_list()
-        for node in reversed(nodes):
+        # Salin seluruh history dari branch aktif
+        for node in reversed(self.current_stack().to_list()):
             clone = CommitNode(node.message, node.content)
-            clone.commit_id = node.commit_id   # pertahankan id yang sama
-            clone.timestamp = node.timestamp
+            clone.commit_id   = node.commit_id
+            clone.timestamp   = node.timestamp
             clone.fake_address = node.fake_address
             new_stack.push(clone)
-        self._branches[name] = new_stack
-        self._rollbacks[name] = new_rollback
+        self._branches[name]    = new_stack
+        self._rollbacks[name]   = Stack()
+        # Simpan fork-point = HEAD saat branch dibuat
+        head = self.current_stack().peek()
+        self._fork_points[name] = head.commit_id if head else None
         return True
 
     def switch_branch(self, name: str) -> bool:
@@ -182,53 +164,87 @@ class BranchManager:
         self._active = name
         return True
 
-    # ── Merge & Conflict Detection ────────────
-    def detect_conflict(self, other_branch: str) -> bool:
+    # ── Conflict Detection ────────────────────────────────────────────────────
+    def detect_conflict(self, other_branch: str) -> ConflictInfo | None:
         """
-        Konflik terjadi jika HEAD kedua branch berbeda commit_id
-        tapi keduanya memiliki commit setelah fork-point yang sama.
+        Konflik = kedua branch punya commit BARU setelah fork-point yang sama,
+        DAN konten HEAD-nya berbeda.
+        Kembalikan ConflictInfo jika ada konflik, None jika tidak.
         """
         if other_branch not in self._branches:
-            return False
-        main_head = self._branches["main"].peek()
+            return None
+        main_head  = self._branches["main"].peek()
         other_head = self._branches[other_branch].peek()
-        if main_head is None or other_head is None:
-            return False
-        return main_head.commit_id != other_head.commit_id
+        if not main_head or not other_head:
+            return None
 
+        fork_id = self._fork_points.get(other_branch)
+
+        # Cek apakah main punya commit baru setelah fork
+        main_ids  = [n.commit_id for n in self._branches["main"].to_list()]
+        other_ids = [n.commit_id for n in self._branches[other_branch].to_list()]
+
+        main_new_after_fork  = fork_id not in main_ids or main_ids[0] != fork_id
+        other_new_after_fork = other_ids[0] != fork_id
+
+        # Konflik hanya jika KEDUANYA berubah setelah fork & konten HEAD berbeda
+        if main_new_after_fork and other_new_after_fork and \
+                main_head.content != other_head.content:
+            info = ConflictInfo("main", other_branch,
+                                main_head, other_head, fork_id)
+            self.last_conflict = info
+            return info
+
+        return None   # tidak ada konflik
+
+    # ── Merge & Rekonsiliasi ──────────────────────────────────────────────────
     def merge(self, source_branch: str, keep_main: bool = True) -> CommitNode | None:
         """
-        Lakukan merge: pilih commit HEAD mana yang dipakai.
-        Returns: commit node pemenang (sudah di-push ke main).
+        Rekonsiliasi stack:
+        - keep_main=True  → buang HEAD source, pertahankan HEAD main
+        - keep_main=False → ganti HEAD main dengan HEAD source (buat merge-commit)
+        Kembalikan CommitNode pemenang.
         """
         if source_branch not in self._branches:
             return None
+
+        self._active = "main"
+
         if keep_main:
             winner = self._branches["main"].peek()
         else:
-            # Ganti HEAD main dengan HEAD source
-            loser = self._branches["main"].pop()   # pop HEAD main
-            winner = self._branches[source_branch].peek()
-            if winner:
+            # Pop HEAD main (kalah) → push merge-commit baru
+            loser = self._branches["main"].pop()
+            src_head = self._branches[source_branch].peek()
+            if src_head:
                 merge_node = CommitNode(
-                    f"Merge: {winner.message}",
-                    winner.content
+                    f"Merge '{source_branch}': {src_head.message}",
+                    src_head.content
                 )
                 self._branches["main"].push(merge_node)
                 winner = merge_node
-        # Hapus branch yang di-merge (opsional, bisa dipertahankan)
-        # del self._branches[source_branch]
-        self._active = "main"
+            else:
+                winner = loser
+
+        # Tandai konflik selesai
+        if self.last_conflict and self.last_conflict.branch_b == source_branch:
+            self.last_conflict.resolved = True
+            self.last_conflict.winner   = "main" if keep_main else "branch"
+
         return winner
 
-    # ── Top Pointer Info ─────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────────
     def top_pointer(self) -> CommitNode | None:
-        """Referensi ke elemen TOP pada stack branch aktif."""
         return self.current_stack().peek()
 
     def stack_snapshot(self) -> list[CommitNode]:
-        """List semua commit dari TOP ke bawah (untuk visualisasi)."""
         return self.current_stack().to_list()
 
     def rollback_count(self) -> int:
         return self.current_rollback().size()
+
+    def get_branch_head(self, name: str) -> CommitNode | None:
+        return self._branches[name].peek() if name in self._branches else None
+
+    def get_fork_point(self, branch: str) -> str | None:
+        return self._fork_points.get(branch)
