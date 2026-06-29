@@ -20,7 +20,10 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
-import hashlib, time, random
+import hashlib, time, random, pickle, os
+
+# Nama file penyimpanan permanen (auto-save / auto-load)
+SAVE_FILE = "gitflow_session.dat"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,3 +290,37 @@ class BranchManager:
 
     def get_fork_point(self, branch: str) -> str | None:
         return self._fork_points.get(branch)
+
+    # ── Persistence (Auto-Save / Auto-Load) ────────────────────────────────────
+    def save_session(self, path: str = SAVE_FILE) -> bool:
+        """
+        Serialisasi seluruh state BranchManager (semua branch, stack, rollback
+        buffer, fork-point, dan last_conflict) ke file biner lokal memakai
+        pickle. Dipanggil otomatis setelah aksi yang mengubah isi Stack
+        (commit, merge, resolve conflict).
+        """
+        try:
+            with open(path, "wb") as f:
+                pickle.dump(self, f)
+            return True
+        except Exception as e:
+            print(f"[Auto-Save] Gagal menyimpan sesi: {e}")
+            return False
+
+    @staticmethod
+    def load_session(path: str = SAVE_FILE) -> "BranchManager | None":
+        """
+        De-serialisasi BranchManager dari file gitflow_session.dat.
+        Kembalikan None secara aman (tanpa melempar error) jika file belum
+        ada (kunjungan pertama) atau jika file rusak/tidak valid.
+        """
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                obj = pickle.load(f)
+            if isinstance(obj, BranchManager):
+                return obj
+        except Exception as e:
+            print(f"[Auto-Load] Gagal memuat sesi: {e}")
+        return None

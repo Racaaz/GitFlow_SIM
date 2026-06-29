@@ -1,34 +1,34 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║              GitFlow Sim – GUI v4  (Tahap 4: Polish)                       ║
+║              GitFlow Sim – GUI v4  (Tahap 4: Polish)                         ║
 ║                                                                              ║
 ║  CARA MENJALANKAN:                                                           ║
 ║    1. Install dependensi (jika belum):                                       ║
 ║         pip install customtkinter                                            ║
-║    2. Pastikan backend_v4.py ada di folder yang sama, lalu:                 ║
-║         python main_v4.py                                                   ║
+║    2. Pastikan backend.py ada di folder yang sama, lalu:                  ║
+║         python main.py                                                    ║
 ║                                                                              ║
 ║  LIBRARY YANG DIPERLUKAN:                                                    ║
-║    - customtkinter >= 5.2.0   pip install customtkinter                     ║
-║    - tkinter                  (bawaan Python – tidak perlu pip)             ║
-║    - hashlib, time, random    (bawaan Python – tidak perlu pip)             ║
+║    - customtkinter >= 5.2.0   pip install customtkinter                      ║
+║    - tkinter                  (bawaan Python – tidak perlu pip)              ║
+║    - hashlib, time, random    (bawaan Python – tidak perlu pip)              ║
 ║                                                                              ║
 ║  CATATAN FONT:                                                               ║
-║    Aplikasi menggunakan font "JetBrains Mono" jika tersedia.               ║
-║    Jika tidak, tkinter akan fallback ke font monospace sistem secara        ║
-║    otomatis — aplikasi tetap berjalan normal.                               ║
+║    Aplikasi menggunakan font "JetBrains Mono" jika tersedia.                 ║
+║    Jika tidak, tkinter akan fallback ke font monospace sistem secara         ║
+║    otomatis — aplikasi tetap berjalan normal.                                ║
 ║                                                                              ║
 ║  PANEL LAYOUT:                                                               ║
-║    Kiri   → Memory & Stack Monitor (visualisasi linked list + animasi)     ║
-║    Tengah → Time-Travel Visualizer & Editor commit                          ║
-║    Kanan  → Conflict Arena (aktif otomatis saat merge conflict)             ║
+║    Kiri   → Memory & Stack Monitor (visualisasi linked list + animasi)       ║
+║    Tengah → Time-Travel Visualizer & Editor commit                           ║
+║    Kanan  → Conflict Arena (aktif otomatis saat merge conflict)              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import simpledialog
-from backend import BranchManager, CommitNode, ConflictInfo
+from backend import BranchManager, CommitNode, ConflictInfo, SAVE_FILE
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -86,9 +86,16 @@ class GitFlowSimApp(ctk.CTk):
         self.minsize(1200, 700)
         self.configure(fg_color=C["bg_dark"])
 
-        self.bm = BranchManager()
-        self.bm.commit("Initial commit",
-                        "# Selamat datang di GitFlow Sim!\n\nEdit teks di sini lalu klik Commit.")
+        # ── AUTO-LOAD: cek apakah ada sesi tersimpan sebelumnya ──────────────
+        loaded_bm = BranchManager.load_session()
+        if loaded_bm is not None:
+            self.bm = loaded_bm
+            self._session_restored = True
+        else:
+            self.bm = BranchManager()
+            self.bm.commit("Initial commit",
+                            "# Selamat datang di GitFlow Sim!\n\nEdit teks di sini lalu klik Commit.")
+            self._session_restored = False
 
         self._conflict_branch_name: str | None = None
         self._blink_job     = None
@@ -101,8 +108,26 @@ class GitFlowSimApp(ctk.CTk):
         self._build_center_panel()
         self._build_right_panel()
 
+        # ── SINKRONISASI GUI dengan data yang ter-load (jika ada) ────────────
+        self._update_branch_selector()
+        head = self.bm.top_pointer()
+        if head:
+            self._set_editor(head.content)
+
         self._sync_all()
         self.after(120, self._render_timeline)
+
+        if self._session_restored:
+            self.after(200, lambda: self._flash_status(
+                "💾  Sesi sebelumnya berhasil dimuat otomatis.", color=C["accent2"]))
+
+        # Auto-save juga saat aplikasi ditutup (pengaman tambahan)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        """Simpan sesi sebelum aplikasi benar-benar ditutup."""
+        self.bm.save_session()
+        self.destroy()
 
     # ══════════════════════════════════════════════════════════════════════════
     # TOP BAR
@@ -681,6 +706,7 @@ class GitFlowSimApp(ctk.CTk):
         self._flash_status(f"✔  Commit [{node.commit_id}] — '{message}'",
                            color=C["accent2"])
         self._sync_all(animate_push=True)
+        self.bm.save_session()
 
     def _on_rewind(self):
         """Handler tombol Rewind. Safe – tidak crash saat stack minimal."""
@@ -752,6 +778,7 @@ class GitFlowSimApp(ctk.CTk):
             self._update_branch_selector()
             self._flash_status(f"⎇  Branch [{name}] dibuat & aktif.", color=C["accent"])
             self._sync_all()
+            self.bm.save_session()
         else:
             self._flash_status(f"⚠  Branch '{name}' sudah ada.", color=C["accent3"])
 
@@ -791,6 +818,7 @@ class GitFlowSimApp(ctk.CTk):
             self._flash_status(f"↩  Merge [{src}] → main sukses (no conflict).",
                                color=C["accent2"])
             self._sync_all()
+            self.bm.save_session()
 
     def _resolve_conflict(self, keep_main: bool):
         """Selesaikan konflik dengan memilih versi main atau branch."""
@@ -807,6 +835,7 @@ class GitFlowSimApp(ctk.CTk):
         self._flash_status(f"✔  Konflik selesai — pemenang: [{label}]",
                            color=C["conf_resolved"])
         self._sync_all()
+        self.bm.save_session()
 
     # ══════════════════════════════════════════════════════════════════════════
     # ANIMASI VISUAL
