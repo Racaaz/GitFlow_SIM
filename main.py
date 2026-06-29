@@ -1,33 +1,24 @@
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║              GitFlow Sim – GUI v4  (Tahap 4: Polish)                         ║
-║                                                                              ║
-║  CARA MENJALANKAN:                                                           ║
-║    1. Install dependensi (jika belum):                                       ║
-║         pip install customtkinter                                            ║
-║    2. Pastikan backend.py ada di folder yang sama, lalu:                  ║
-║         python main.py                                                    ║
-║                                                                              ║
-║  LIBRARY YANG DIPERLUKAN:                                                    ║
-║    - customtkinter >= 5.2.0   pip install customtkinter                      ║
-║    - tkinter                  (bawaan Python – tidak perlu pip)              ║
-║    - hashlib, time, random    (bawaan Python – tidak perlu pip)              ║
-║                                                                              ║
-║  CATATAN FONT:                                                               ║
-║    Aplikasi menggunakan font "JetBrains Mono" jika tersedia.                 ║
-║    Jika tidak, tkinter akan fallback ke font monospace sistem secara         ║
-║    otomatis — aplikasi tetap berjalan normal.                                ║
-║                                                                              ║
-║  PANEL LAYOUT:                                                               ║
-║    Kiri   → Memory & Stack Monitor (visualisasi linked list + animasi)       ║
-║    Tengah → Time-Travel Visualizer & Editor commit                           ║
-║    Kanan  → Conflict Arena (aktif otomatis saat merge conflict)              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║              GitFlow Sim – GUI v4  (Tahap 4: Polish – Final)                  ║
+║                                                                               ║
+║  PERUBAHAN v4 FINAL:                                                          ║
+║    ✔  Tombol "📎 Attach File" untuk membuka file eksternal ke editor          ║ 
+║    ✔  Dark mode konsisten (Charcoal + Slate Gray + Neon Electric)             ║  
+║    ✔  Flash animasi push/pop pada Panel Kiri                                  ║ 
+║    ✔  Fix ZeroDivisionError pada slider saat stack kosong / 1 commit          ║ 
+║    ✔  Guard index-out-of-bounds pada tombol Rewind                            ║
+║    ✔  Validasi pesan & konten kosong sebelum commit                           ║ 
+║                                                                               ║
+║  CARA MENJALANKAN:                                                            ║
+║    1. pip install customtkinter                                               ║
+║    2. python main.py                                                          ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import simpledialog, filedialog, messagebox
 from backend import BranchManager, CommitNode, ConflictInfo, SAVE_FILE
 
 ctk.set_appearance_mode("dark")
@@ -284,9 +275,26 @@ class GitFlowSimApp(ctk.CTk):
                      font=FT, text_color=C["accent"]).pack(anchor="w", padx=12, pady=(12, 0))
         ctk.CTkFrame(outer, height=1, fg_color=C["border"]).pack(fill="x", padx=12, pady=6)
 
-        # Editor
-        ctk.CTkLabel(outer, text="  📄 Simulasi Isi File", font=FB,
-                     text_color=C["text"]).pack(anchor="w", padx=12)
+        # ── Label + tombol Attach File (sebaris) ─────────────────────────────
+        editor_hdr = ctk.CTkFrame(outer, fg_color="transparent")
+        editor_hdr.pack(fill="x", padx=12)
+        ctk.CTkLabel(editor_hdr, text="  📄 Simulasi Isi File", font=FB,
+                     text_color=C["text"]).pack(side="left")
+        ctk.CTkButton(
+            editor_hdr,
+            text="📎 Attach File",
+            font=("Segoe UI", 10),
+            fg_color=C["bg_card"],
+            hover_color=C["border"],
+            text_color=C["accent4"],
+            border_width=1,
+            border_color=C["accent4"],
+            corner_radius=6,
+            width=120,
+            height=26,
+            command=self._on_attach_file
+        ).pack(side="right")
+
         self.txt_editor = ctk.CTkTextbox(
             outer, height=155, font=FM, fg_color=C["bg_dark"],
             text_color=C["text"], border_color=C["border"], border_width=1)
@@ -373,20 +381,19 @@ class GitFlowSimApp(ctk.CTk):
         w    = c.winfo_width() or 420
         h    = 100
         mx   = 44
+        # FIX: hindari ZeroDivisionError saat hanya 1 node
         step = (w - 2*mx) / max(total - 1, 1)
         cy   = h // 2
 
         for i, node in enumerate(nodes_asc):
-            x      = mx + i * step
+            x       = mx + i * step
             is_head = (i == total - 1)
-            # Garis penghubung
             if i > 0:
                 c.create_line(mx + (i-1)*step + 14, cy, x - 14, cy,
                               fill=C["accent"] if is_head else C["border"],
                               width=2, dash=(4, 3))
             r    = 15 if is_head else 10
             fill = C["top_ptr"] if is_head else C["accent2"]
-            # Glow ring pada HEAD
             if is_head:
                 c.create_oval(x-r-4, cy-r-4, x+r+4, cy+r+4,
                               fill="", outline=C["top_ptr_glow"], width=2)
@@ -462,13 +469,11 @@ class GitFlowSimApp(ctk.CTk):
         # ── Active conflict UI ────────────────────────────────────────────────
         self.conflict_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
 
-        # Canvas pointer clash
         self.conf_canvas = tk.Canvas(
             self.conflict_frame, height=220, bg=C["conf_bg"],
             highlightthickness=0)
         self.conf_canvas.pack(fill="x", padx=12, pady=(0, 6))
 
-        # Info cards: main vs branch
         cards_row = ctk.CTkFrame(self.conflict_frame, fg_color="transparent")
         cards_row.pack(fill="x", padx=12, pady=(0, 6))
         cards_row.columnconfigure(0, weight=1)
@@ -476,7 +481,6 @@ class GitFlowSimApp(ctk.CTk):
         self.card_main   = self._make_conflict_card(cards_row, 0, "main",   C["conf_main"])
         self.card_branch = self._make_conflict_card(cards_row, 1, "branch", C["conf_branch"])
 
-        # Diff view
         ctk.CTkLabel(self.conflict_frame, text="  ⚡  Perbedaan Konten (HEAD vs HEAD)",
                      font=FB, text_color=C["text_dim"]).pack(anchor="w", padx=12)
         self.txt_diff = ctk.CTkTextbox(
@@ -486,7 +490,6 @@ class GitFlowSimApp(ctk.CTk):
             state="disabled")
         self.txt_diff.pack(fill="x", padx=12, pady=(2, 8))
 
-        # Resolution buttons
         ctk.CTkFrame(self.conflict_frame, height=1,
                      fg_color=C["conf_border"]).pack(fill="x", padx=12, pady=(0, 8))
         ctk.CTkLabel(self.conflict_frame, text="  Pilih Resolusi:",
@@ -506,7 +509,6 @@ class GitFlowSimApp(ctk.CTk):
             command=lambda: self._resolve_conflict(keep_main=False))
         self.btn_keep_branch.pack(side="left", expand=True, fill="x", padx=(4, 0))
 
-        # Resolved banner (tersembunyi sampai konflik selesai)
         self.resolved_frame = ctk.CTkFrame(
             self.conflict_frame,
             fg_color="#061A0D", corner_radius=8,
@@ -533,10 +535,6 @@ class GitFlowSimApp(ctk.CTk):
 
     # ── Conflict Arena canvas drawing ─────────────────────────────────────────
     def _draw_conflict_canvas(self, info: ConflictInfo):
-        """
-        Visualisasi dua pointer bertabrakan memperebutkan fork-point.
-        Animasi jitter memberikan kesan 'perebutan' secara visual.
-        """
         c  = self.conf_canvas
         c.delete("all")
         W  = c.winfo_width() or 310
@@ -544,13 +542,11 @@ class GitFlowSimApp(ctk.CTk):
         cx = W // 2
         cy = H // 2
 
-        # Subtle grid background
         for x in range(0, W, 24):
             c.create_line(x, 0, x, H, fill="#1A0808", width=1)
         for y in range(0, H, 24):
             c.create_line(0, y, W, y, fill="#1A0808", width=1)
 
-        # Fork-point box (tengah)
         bw, bh = 110, 52
         c.create_rectangle(cx-bw//2-2, cy-bh//2-2, cx+bw//2+2, cy+bh//2+2,
                            fill="#2D1800", outline=C["conf_fork"], width=2)
@@ -559,7 +555,6 @@ class GitFlowSimApp(ctk.CTk):
         c.create_text(cx, cy + 8, text=f"id: {info.fork_id or '—'}",
                       fill=C["text_dim"], font=("JetBrains Mono", 8))
 
-        # HEAD main (kiri) – jitter kiri-kanan
         jitter = self._ptr_anim_step % 2
         lx = 28 + jitter
         c.create_rectangle(lx, cy-22, lx+90, cy+22,
@@ -574,7 +569,6 @@ class GitFlowSimApp(ctk.CTk):
         c.create_text(lx+45, cy+30, text=info.head_a.fake_address,
                       fill=C["text_dim"], font=("JetBrains Mono", 7))
 
-        # HEAD branch (kanan) – jitter berlawanan
         rx = W - 28 - 90 - jitter
         c.create_rectangle(rx, cy-22, rx+90, cy+22,
                            fill="#2D0707", outline=C["conf_branch"], width=2)
@@ -588,11 +582,9 @@ class GitFlowSimApp(ctk.CTk):
         c.create_text(rx+45, cy+30, text=info.head_b.fake_address,
                       fill=C["text_dim"], font=("JetBrains Mono", 7))
 
-        # Berkedip bergantian merah/amber
         bolt_color = C["accent3"] if self._ptr_anim_step % 2 == 0 else C["conf_fork"]
         c.create_text(cx, cy - bh//2 - 22, text="⚡ CONFLICT ⚡",
                       fill=bolt_color, font=("Segoe UI", 10, "bold"))
-
         c.create_text(cx, H - 14,
                       text="Dua pointer memperebutkan slot memori yang sama",
                       fill=C["text_dim"], font=("Segoe UI", 8))
@@ -681,6 +673,45 @@ class GitFlowSimApp(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════════════
     # EVENT HANDLERS
     # ══════════════════════════════════════════════════════════════════════════
+
+    def _on_attach_file(self):
+        """
+        Buka dialog file, baca isi teks, dan masukkan ke editor.
+        Mendukung .txt, .py, .json, .md, .csv, dan semua format teks.
+        """
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Pilih file yang akan di-attach ke editor",
+            filetypes=[
+                ("File Teks", "*.txt"),
+                ("Python Script", "*.py"),
+                ("JSON", "*.json"),
+                ("Markdown", "*.md"),
+                ("CSV", "*.csv"),
+                ("Semua File", "*.*"),
+            ]
+        )
+        if not path:
+            return   # user membatalkan dialog
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            messagebox.showerror("Gagal Membaca File",
+                                 f"Tidak dapat membaca file:\n{e}",
+                                 parent=self)
+            return
+
+        # Masukkan ke editor (ganti seluruh isi yang ada)
+        self._set_editor(content)
+
+        # Tampilkan nama file di status bar sebagai konfirmasi
+        import os
+        filename = os.path.basename(path)
+        self._flash_status(f"📎  File '{filename}' berhasil dimuat ke editor.",
+                           color=C["accent4"])
+
     def _on_commit(self):
         """Handler tombol Commit. Validasi pesan & konten sebelum commit."""
         message = self.entry_msg.get().strip()
@@ -688,17 +719,20 @@ class GitFlowSimApp(ctk.CTk):
 
         # Validasi: pesan kosong
         if not message:
-            self._flash_status("⚠  Tulis commit message terlebih dahulu!", color=C["accent3"])
+            self._flash_status_blink("⚠  Tulis commit message terlebih dahulu!",
+                                     color=C["accent3"])
             self.entry_msg.focus()
-            # Beri efek border merah pada entry
             self.entry_msg.configure(border_color=C["accent3"])
             self.after(1500, lambda: self.entry_msg.configure(border_color=C["border"]))
             return
 
         # Validasi: konten editor kosong
         if not content.strip():
-            self._flash_status("⚠  Editor kosong! Tulis sesuatu sebelum commit.", color=C["accent3"])
+            self._flash_status_blink("⚠  Editor kosong! Tulis atau attach file sebelum commit.",
+                                     color=C["accent3"])
             self.txt_editor.focus()
+            self.txt_editor.configure(border_color=C["accent3"])
+            self.after(1500, lambda: self.txt_editor.configure(border_color=C["border"]))
             return
 
         node = self.bm.commit(message, content)
@@ -714,8 +748,6 @@ class GitFlowSimApp(ctk.CTk):
         if not self.bm.can_rewind():
             self._flash_status("⚠  Sudah di commit paling awal – tidak bisa rewind lagi.",
                                color=C["accent3"])
-            # Getar tombol rewind sebagai feedback visual
-            self._shake_button(self.btn_rewind)
             return
 
         self.bm.rewind()
@@ -730,7 +762,6 @@ class GitFlowSimApp(ctk.CTk):
         """Handler tombol Forward."""
         if not self.bm.can_forward():
             self._flash_status("⚠  Tidak ada commit untuk di-forward.", color=C["accent3"])
-            self._shake_button(self.btn_forward)
             return
         node = self.bm.forward()
         if node:
@@ -740,13 +771,18 @@ class GitFlowSimApp(ctk.CTk):
         self._sync_all()
 
     def _on_slider(self, val):
-        """Handler slider time-travel."""
+        """
+        Handler slider time-travel.
+        FIX: guard total <= 1 mencegah ZeroDivisionError dan perilaku aneh
+             saat stack kosong atau hanya berisi 1 commit.
+        """
         stack_size = self.bm.current_stack().size()
         rb_size    = self.bm.current_rollback().size()
         total      = stack_size + rb_size
+        # Guard: tidak ada pergerakan yang bermakna jika total ≤ 1
         if total <= 1:
             return
-        target  = int(float(val))
+        target  = max(1, int(float(val)))   # target minimal 1 (jangan pop semua)
         current = stack_size
         if target < current:
             for _ in range(current - target):
@@ -863,32 +899,8 @@ class GitFlowSimApp(ctk.CTk):
         except Exception:
             pass
 
-    def _shake_button(self, btn):
-        """
-        Efek 'goyang' pada tombol sebagai feedback error visual.
-        Tombol bergerak kecil kiri-kanan 3x.
-        """
-        original_x = btn.winfo_x()
-        offsets = [4, -4, 3, -3, 2, -2, 0]
-        def _step(i=0):
-            if i >= len(offsets):
-                return
-            try:
-                btn.place_configure(x=original_x + offsets[i])
-            except Exception:
-                pass
-            self.after(40, lambda: _step(i + 1))
-        # Shake hanya bekerja jika tombol di-place; jika pack, skip (graceful)
-        try:
-            btn.place_configure(x=original_x)
-            _step()
-        except Exception:
-            pass
-
     def _flash_status_blink(self, msg: str, color: str, times: int = 3):
-        """
-        Teks status berkedip (blink) untuk pesan error/warning penting.
-        """
+        """Teks status berkedip untuk pesan error/warning penting."""
         def _blink(n):
             if n <= 0:
                 self.lbl_status.configure(text=f"  {msg}", text_color=color)
@@ -912,11 +924,11 @@ class GitFlowSimApp(ctk.CTk):
         if animate_push:
             # Kilatan hijau neon saat PUSH
             self.after(60, lambda: self._flash_top_card(C["accent2"], C["top_ptr_glow"]))
-            self.after(420, lambda: self._flash_top_card("#003322", C["top_ptr_glow"]))
+            self.after(420, lambda: self._flash_top_card(C["flash_push"], C["top_ptr_glow"]))
         if animate_pop:
             # Kilatan amber saat POP
             self.after(60, lambda: self._flash_top_card(C["accent4"], C["top_ptr_glow"]))
-            self.after(420, lambda: self._flash_top_card("#332200", C["top_ptr_glow"]))
+            self.after(420, lambda: self._flash_top_card(C["flash_pop"], C["top_ptr_glow"]))
 
     def _update_buttons(self):
         """Enable/disable tombol rewind dan forward sesuai state."""
@@ -926,16 +938,21 @@ class GitFlowSimApp(ctk.CTk):
             state="normal" if self.bm.can_forward() else "disabled")
 
     def _update_slider(self):
-        """Sinkronisasi posisi slider time-travel."""
-        ss = self.bm.current_stack().size()
-        rb = self.bm.current_rollback().size()
+        """
+        Sinkronisasi posisi slider time-travel.
+        FIX: slider dikunci di posisi 100 ketika total ≤ 1 untuk mencegah
+             ZeroDivisionError di dalam CTkSlider saat range = 0.
+        """
+        ss    = self.bm.current_stack().size()
+        rb    = self.bm.current_rollback().size()
         total = ss + rb
         if total > 1:
-            self.slider.configure(from_=1, to=float(total))
+            self.slider.configure(from_=1, to=float(total), state="normal")
             self.slider.set(float(ss))
         else:
-            self.slider.configure(from_=0, to=100)
-            self.slider.set(100)
+            # Tidak ada pergerakan bermakna — kunci slider di posisi aman
+            self.slider.configure(from_=0, to=1, state="disabled")
+            self.slider.set(1)
 
     def _update_branch_selector(self):
         """Perbarui ComboBox branch dengan daftar branch terkini."""
